@@ -1,27 +1,25 @@
 """
 animate.py
 ==========
-Animerar båda lösarna sida vid sida, så man ser skillnaden direkt.
+Visar hur intervallet krymper efter varje gissning.
 
-  Vänster: vanlig backtracking     Höger: smart backtracking (MRV)
+1. resultat/intervall_binar.png
+   Stillbild: binärsökningens intervall gissning för gissning.
 
-  Svarta siffror  = givna från början
-  Blå siffror     = placerade av lösaren
-  Röd ruta        = siffran togs precis bort igen (backning)
-
-Varje bildruta i animationen motsvarar lika många steg för båda lösarna,
-så den smarta lösaren blir klar mycket tidigare.
+2. resultat/animation.gif
+   Animation där alla tre strategierna letar efter samma tal samtidigt.
+     Blå stapel  = tal som fortfarande är möjliga
+     Röd linje   = datorns gissning
+     Svart pil   = talet man tänker på
 
 Kör:
-  python animate.py                      -> sparar resultat/animation.gif (Lätt 1)
-  python animate.py "Medel 3"            -> välj ett annat sudoku ur puzzles.py
-  python animate.py "Lätt 1" --visa      -> visa i ett fönster istället för att spara
-
-Tips: välj ett lätt sudoku. På svåra sudokun gör vanlig backtracking
-miljontals steg och då blir animationen för lång.
+  python animate.py              -> talet 73
+  python animate.py 37           -> välj ett annat tal (0-100)
+  python animate.py 37 --visa    -> visa animationen i ett fönster istället för att spara
 """
 
 import os
+import random
 import sys
 
 import matplotlib
@@ -31,114 +29,116 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import Rectangle
 
-from sudoku_solver import parse, solve_basic, solve_smart, copy_board
-from puzzles import PUZZLES
+from guessing_game import STRATEGIES, NAMES, LOW, HIGH, play, auto_answer
 
-MAX_FRAMES = 300          # max antal bildrutor (håller GIF:en lagom stor)
-FPS = 15
-
-
-def find_puzzle(name):
-    level, number = name.split()
-    return PUZZLES[level.lower()][int(number) - 1]
+OUT_DIR = "resultat"
+FPS = 3
+COLORS = {"binär": "#4C78A8", "slump": "#F58518", "linjär": "#54A24B"}
 
 
-def draw_grid(ax, title):
-    ax.set_xlim(0, 9)
-    ax.set_ylim(9, 0)
-    ax.set_aspect("equal")
-    ax.axis("off")
-    for i in range(10):
-        lw = 2.5 if i % 3 == 0 else 0.6
-        ax.plot([0, 9], [i, i], color="black", lw=lw)
-        ax.plot([i, i], [0, 9], color="black", lw=lw)
-    ax.set_title(title, fontsize=13)
+# ----------------------------------------------------------------------
+# Stillbild: binärsökningens intervall per gissning
+# ----------------------------------------------------------------------
+def static_binary_figure(secret):
+    history = play(secret, STRATEGIES["binär"])
+    fig, ax = plt.subplots(figsize=(10, 0.8 * len(history) + 1.6))
+    for i, (low, high, guess) in enumerate(history, start=1):
+        ax.barh(i, high - low + 1, left=low - 0.5, height=0.55,
+                color=COLORS["binär"], alpha=0.35)
+        ax.plot(guess, i, "o", color="red")
+        answer = auto_answer(secret, guess)
+        ax.text(101.5, i, f"gissar {guess} -> {answer}   ({high - low + 1} möjliga tal)",
+                va="center", fontsize=10)
+    ax.axvline(secret, color="black", ls=":", lw=1)
+    ax.set_xlim(-1, 101)
+    ax.set_ylim(len(history) + 0.7, 0.3)
+    ax.set_yticks(range(1, len(history) + 1))
+    ax.set_yticklabels([f"Gissning {i}" for i in range(1, len(history) + 1)])
+    ax.set_xlabel("Möjliga tal")
+    ax.set_title(f"Binärsökning efter talet {secret}: intervallet halveras varje gång")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.72)
+    path = os.path.join(OUT_DIR, "intervall_binar.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print("Sparade", path)
 
 
-class BoardView:
-    """Håller koll på ett brädes texter och färger i animationen."""
+# ----------------------------------------------------------------------
+# Animation: alla tre strategier samtidigt
+# ----------------------------------------------------------------------
+class Row:
+    """En rad i animationen: en tallinje för en strategi."""
 
-    def __init__(self, ax, puzzle, events, title):
-        self.puzzle = puzzle
-        self.board = copy_board(puzzle)
-        self.events = events
-        self.pos = 0                                  # hur många händelser som spelats upp
-        self.steps = 0
-        self.backtracks = 0
-        draw_grid(ax, title)
-        self.highlight = Rectangle((0, 0), 1, 1, color="red", alpha=0.0)
-        ax.add_patch(self.highlight)
-        self.texts = [[ax.text(c + 0.5, r + 0.55, "", ha="center", va="center", fontsize=15)
-                       for c in range(9)] for r in range(9)]
-        for r in range(9):
-            for c in range(9):
-                if puzzle[r][c]:
-                    self.texts[r][c].set_text(str(puzzle[r][c]))
-                    self.texts[r][c].set_fontweight("bold")
-        self.counter = ax.text(4.5, 9.6, "", ha="center", va="center", fontsize=11)
+    def __init__(self, ax, name, secret, history):
+        self.name = name
+        self.secret = secret
+        self.history = history
+        ax.set_xlim(-1, 101)
+        ax.set_ylim(0, 1)
+        ax.set_yticks([])
+        ax.set_xticks(range(0, 101, 10))
+        ax.add_patch(Rectangle((-0.5, 0.35), 101, 0.3, color="#e5e5e5"))
+        self.interval = Rectangle((-0.5, 0.35), 101, 0.3, color=COLORS[name], alpha=0.6)
+        ax.add_patch(self.interval)
+        self.guess_line = ax.axvline(-10, ymin=0.25, ymax=0.75, color="red", lw=2.5)
+        ax.annotate("", xy=(secret, 0.33), xytext=(secret, 0.05),
+                    arrowprops=dict(arrowstyle="->", color="black"))
+        self.title = ax.set_title("", loc="left", fontsize=11)
 
-    def advance_to(self, target):
-        last = None
-        while self.pos < min(target, len(self.events)):
-            r, c, d = self.events[self.pos]
-            self.board[r][c] = d
-            self.texts[r][c].set_text(str(d) if d else "")
-            self.texts[r][c].set_color("tab:blue")
-            if d:
-                self.steps += 1
-            else:
-                self.backtracks += 1
-            last = (r, c, d)
-            self.pos += 1
-        # Markera senaste backning med röd ruta
-        if last and last[2] == 0:
-            self.highlight.set_xy((last[1], last[0]))
-            self.highlight.set_alpha(0.35)
+    def show(self, frame):
+        k = min(frame, len(self.history) - 1)
+        low, high, guess = self.history[k]
+        self.interval.set_x(low - 0.5)
+        self.interval.set_width(high - low + 1)
+        self.guess_line.set_xdata([guess, guess])
+        answer = auto_answer(self.secret, guess)
+        if frame >= len(self.history) - 1:
+            self.title.set_text(f"{NAMES[self.name]}: KLAR, hittade {self.secret} "
+                                f"på {len(self.history)} gissningar")
+            self.title.set_color("green")
         else:
-            self.highlight.set_alpha(0.0)
-        done = self.pos >= len(self.events)
-        status = "  KLAR!" if done else ""
-        self.counter.set_text(f"steg: {self.steps}   backningar: {self.backtracks}{status}")
-        self.counter.set_color("green" if done else "black")
+            self.title.set_text(f"{NAMES[self.name]}: gissning {k + 1}: {guess} -> {answer}   "
+                                f"({high - low + 1} möjliga tal)")
+            self.title.set_color("black")
+
+
+def animation(secret):
+    rng = random.Random(3)
+    histories = {name: play(secret, s, rng=rng) for name, s in STRATEGIES.items()}
+    longest = max(len(h) for h in histories.values())
+    n_frames = longest + FPS * 3                  # + 3 sekunder paus i slutet
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 6.5))
+    fig.suptitle(f"Datorn letar efter talet {secret}", fontsize=14)
+    rows = [Row(ax, name, secret, histories[name]) for ax, name in zip(axes, STRATEGIES)]
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.7, top=0.88)
+
+    def update(frame):
+        for row in rows:
+            row.show(frame)
+        return []
+
+    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000 / FPS, repeat=False)
+    if "--visa" in sys.argv:
+        plt.show()
+    else:
+        path = os.path.join(OUT_DIR, "animation.gif")
+        print(f"Sparar {path} ({n_frames} bildrutor)...")
+        anim.save(path, writer=PillowWriter(fps=FPS), dpi=80)
+        print("Sparade", path)
 
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    name = args[0] if args else "Lätt 1"
-    puzzle = parse(find_puzzle(name))
-
-    basic = solve_basic(puzzle, record=True, max_steps=200_000)
-    smart = solve_smart(puzzle, record=True)
-    if basic.gave_up:
-        print("Vanlig backtracking behöver för många steg för en animation. Välj ett lättare sudoku.")
+    secret = int(args[0]) if args else 73
+    if not LOW <= secret <= HIGH:
+        print(f"Talet måste vara mellan {LOW} och {HIGH}.")
         return
-
-    longest = max(len(basic.events), len(smart.events))
-    per_frame = max(1, -(-longest // MAX_FRAMES))       # avrunda uppåt
-    n_frames = -(-longest // per_frame) + FPS * 2        # + 2 sekunder paus i slutet
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 6.2))
-    fig.suptitle(f"Sudoku: {name}   ({per_frame} händelser per bildruta)", fontsize=14)
-    left = BoardView(ax1, puzzle, basic.events, "Vanlig backtracking")
-    right = BoardView(ax2, puzzle, smart.events, "Smart backtracking (MRV)")
-    fig.subplots_adjust(bottom=0.08)
-
-    def update(frame):
-        target = (frame + 1) * per_frame
-        left.advance_to(target)
-        right.advance_to(target)
-        return []
-
-    anim = FuncAnimation(fig, update, frames=n_frames, interval=1000 / FPS, repeat=False)
-
-    if "--visa" in sys.argv:
-        plt.show()
-    else:
-        os.makedirs("resultat", exist_ok=True)
-        path = os.path.join("resultat", "animation.gif")
-        print(f"Sparar {path} ({n_frames} bildrutor), det kan ta ett par minuter...")
-        anim.save(path, writer=PillowWriter(fps=FPS), dpi=80)
-        print("Klart!")
+    os.makedirs(OUT_DIR, exist_ok=True)
+    static_binary_figure(secret)
+    animation(secret)
 
 
 if __name__ == "__main__":

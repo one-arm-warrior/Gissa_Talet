@@ -1,11 +1,18 @@
-# Sudokulösare: vanlig vs smart backtracking
+# Gissa talet: binärsökning vs slumpgissning vs linjär sökning
 
 Projekt i perspektivkursen DT2015 (HT26), "Programming Project with AI Assistance".
 
-Programmet löser sudokun med två algoritmer och jämför dem:
+Du tänker på ett heltal mellan 0 och 100. Datorn gissar, och du svarar **högre**, **lägre** eller **rätt**.
+Programmet jämför tre sätt att gissa:
 
-- **Vanlig backtracking**: fyller rutorna i läsordning och testar 1-9. Blir det fel backar den.
-- **Smart backtracking (MRV, "Minimum Remaining Values")**: fyller alltid den ruta som har *minst* möjliga siffror kvar. Om en ruta har 0 möjliga siffror backar den direkt.
+- **Binärsökning**: gissa mitten av intervallet som är kvar. Varje svar halverar intervallet.
+- **Slumpgissning**: gissa ett slumpat tal i intervallet som är kvar.
+- **Linjär sökning**: gissa 0, 1, 2, 3, ... tills det blir rätt.
+
+Extra funktioner:
+
+- **Intervallet visas** efter varje svar, både i terminalen och i en animation.
+- **Fuskupptäckt**: om svaren motsäger varandra säger programmet till.
 
 ## Krav
 
@@ -19,28 +26,24 @@ pip install matplotlib pillow
 
 | Fil | Vad den gör |
 |---|---|
-| `sudoku_solver.py` | Båda lösarna + hjälpfunktioner. Kör den för en snabb demo. |
-| `puzzles.py` | 9 testsudokun (lätt/medel/svår) och en generator för slumpade sudokun med unik lösning. |
-| `compare.py` | Jämförelsen. Skriver ut en tabell och sparar grafer i `resultat/`. |
-| `animate.py` | Animation där båda lösarna arbetar sida vid sida. |
-| `test_sudoku.py` | 13 tester som kontrollerar att allt fungerar. |
+| `guessing_game.py` | Strategierna, spelreglerna och det interaktiva spelet. |
+| `compare.py` | Experimenten. Skriver ut tabeller och sparar grafer i `resultat/`. |
+| `animate.py` | Bild och animation som visar hur intervallet krymper. |
+| `test_guessing.py` | 13 tester som kontrollerar att allt fungerar. |
 | `presentationsunderlag.md` | Text och siffror att använda i slides. |
 
 ## Så kör ni
 
 ```
-python sudoku_solver.py          # demo: löser ett sudoku med båda metoderna
-python test_sudoku.py            # kör alla tester
-python compare.py                # hela jämförelsen (ca 40 s), grafer hamnar i resultat/
-python compare.py --snabb        # snabbare version med färre slumpade sudokun
-python animate.py                # sparar resultat/animation.gif (tar ett par minuter)
-python animate.py "Lätt 2" --visa  # visar animationen i ett fönster istället
+python guessing_game.py           # spela mot binärsökning
+python guessing_game.py slump     # spela mot slumpgissning (eller: linjär)
+python test_guessing.py           # kör alla tester
+python compare.py                 # experimenten (ca 10 s), grafer hamnar i resultat/
+python animate.py                 # bild + animation för talet 73 (ca 20 s)
+python animate.py 37 --visa       # annat tal, visa animationen i ett fönster
 ```
-
-Tiderna i resultaten beror på datorn. Antalet steg är däremot alltid detsamma.
 
 ## Källor
 
-- Testsudokun: Wikipedia ("Sudoku", "Sudoku solving algorithms"), Arto Inkala (2012),
-  Peter Norvig, "Solving Every Sudoku Puzzle", Project Euler problem 96.
+- Binärsökning: standardalgoritm, se t.ex. Wikipedia "Binary search".
 - Koden är skriven med hjälp av AI (Claude). Se `presentationsunderlag.md`.

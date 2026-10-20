@@ -1,75 +1,50 @@
 """
 compare.py
 ==========
-Jämför vanlig backtracking med smart backtracking (MRV).
+Jämför binärsökning, slumpgissning och linjär sökning.
 
-Experiment 1: Kör båda lösarna på de 9 testsudokuna (lätt/medel/svår).
-              Mäter antal steg, antal backningar och tid.
-              -> resultat/jamforelse_steg.png, resultat/jamforelse_tid.png,
-                 resultat/jamforelse.csv
+Experiment 1: Datorn gissar ALLA tal 0-100 med varje strategi.
+              Slumpgissning körs 200 gånger per tal eftersom den ger olika
+              resultat varje gång.
+              -> resultat/medel_och_varsta.png   (medelvärde och värsta fall)
+                 resultat/fordelning.png         (hur ofta det krävs k gissningar)
+                 resultat/binar_per_tal.png      (antal gissningar för varje tal)
+                 resultat/experiment1.csv
 
-Experiment 2: Ändrar EN sak i taget: antalet givna siffror (ledtrådar).
-              Genererar slumpade sudokun med 24-40 ledtrådar och mäter
-              medelvärdet av antal steg för båda metoderna.
-              -> resultat/steg_mot_ledtradar.png
+Experiment 2: Ändrar EN sak i taget: hur stort intervallet är
+              (10, 100, 1 000, 10 000 och 100 000 tal).
+              -> resultat/skalning.png
+                 resultat/experiment2.csv
 
-Kör:   python compare.py           (hela jämförelsen, tar runt en minut)
-       python compare.py --snabb   (färre slumpade sudokun, går fortare)
+Kör:  python compare.py
 """
 
 import csv
 import os
+import random
 import statistics
-import sys
 
 import matplotlib
 matplotlib.use("Agg")            # spara bilder utan att öppna fönster
 import matplotlib.pyplot as plt
 
-from sudoku_solver import parse, solve_basic, solve_smart, is_solved
-from puzzles import PUZZLES, generate_puzzle
+from guessing_game import STRATEGIES, NAMES, LOW, HIGH, count_guesses
 
 OUT_DIR = "resultat"
-MAX_STEPS = 2_000_000            # vanlig backtracking får ge upp efter så här många steg
-COLORS = {"basic": "#4C78A8", "smart": "#F58518"}
+RANDOM_RUNS = 200                # antal körningar per tal för slumpgissning
+COLORS = {"binär": "#4C78A8", "slump": "#F58518", "linjär": "#54A24B"}
 
 
-def run_experiment_1():
-    rows = []
-    print(f"{'Sudoku':10s} {'Ledtr.':>6s} | {'Vanlig: steg':>13s} {'tid (s)':>8s} | "
-          f"{'Smart: steg':>12s} {'tid (s)':>8s} | {'Steg-kvot':>9s}")
-    print("-" * 82)
-    for level, texts in PUZZLES.items():
-        for i, text in enumerate(texts, start=1):
-            name = f"{level.capitalize()} {i}"
-            puzzle = parse(text)
-            clues = sum(v != 0 for row in puzzle for v in row)
-
-            basic = solve_basic(puzzle, max_steps=MAX_STEPS)
-            smart = solve_smart(puzzle)
-
-            # Kontrollera att svaren faktiskt är korrekta
-            assert is_solved(smart.solution, puzzle), name
-            if not basic.gave_up:
-                assert is_solved(basic.solution, puzzle), name
-
-            ratio = basic.steps / smart.steps
-            ge = ">=" if basic.gave_up else "  "
-            print(f"{name:10s} {clues:6d} | {ge}{basic.steps:11d} {basic.time_s:8.3f} | "
-                  f"{smart.steps:12d} {smart.time_s:8.3f} | {ge}{ratio:7.0f}x")
-            rows.append({
-                "sudoku": name, "ledtradar": clues,
-                "vanlig_steg": basic.steps, "vanlig_backningar": basic.backtracks,
-                "vanlig_tid_s": round(basic.time_s, 4), "vanlig_gav_upp": basic.gave_up,
-                "smart_steg": smart.steps, "smart_backningar": smart.backtracks,
-                "smart_tid_s": round(smart.time_s, 4),
-            })
-    print(f"\n'>=' betyder att vanlig backtracking gav upp efter {MAX_STEPS:,} steg.\n")
-    return rows
+def save_figure(fig, filename):
+    path = os.path.join(OUT_DIR, filename)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    print("Sparade", path)
 
 
-def save_csv(rows):
-    path = os.path.join(OUT_DIR, "jamforelse.csv")
+def save_csv(rows, filename):
+    path = os.path.join(OUT_DIR, filename)
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
         writer.writeheader()
@@ -77,83 +52,139 @@ def save_csv(rows):
     print("Sparade", path)
 
 
-def bar_chart(rows, key_basic, key_smart, ylabel, title, filename):
-    names = [r["sudoku"] for r in rows]
+# ----------------------------------------------------------------------
+# Experiment 1: alla tal 0-100
+# ----------------------------------------------------------------------
+def experiment_1():
+    rng = random.Random(1)       # fast frö -> samma resultat varje körning
+    counts = {}
+    for name, strategy in STRATEGIES.items():
+        runs = RANDOM_RUNS if name == "slump" else 1
+        counts[name] = [count_guesses(secret, strategy, rng=rng)
+                        for secret in range(LOW, HIGH + 1) for _ in range(runs)]
+
+    print(f"{'Strategi':16s} {'Medel':>7s} {'Median':>7s} {'Bästa':>6s} {'Värsta':>7s}")
+    print("-" * 47)
+    rows = []
+    for name, c in counts.items():
+        mean = statistics.mean(c)
+        print(f"{NAMES[name]:16s} {mean:7.2f} {statistics.median(c):7.1f} "
+              f"{min(c):6d} {max(c):7d}")
+        rows.append({"strategi": NAMES[name], "medel": round(mean, 3),
+                     "median": statistics.median(c), "basta": min(c), "varsta": max(c)})
+    print()
+    save_csv(rows, "experiment1.csv")
+
+    # Graf 1: medelvärde och värsta fall
+    fig, ax = plt.subplots(figsize=(8, 5))
+    names = list(counts)
     x = range(len(names))
-    w = 0.4
-    fig, ax = plt.subplots(figsize=(11, 5))
-    b1 = ax.bar([i - w / 2 for i in x], [r[key_basic] for r in rows], w,
-                label="Vanlig backtracking", color=COLORS["basic"])
-    ax.bar([i + w / 2 for i in x], [r[key_smart] for r in rows], w,
-           label="Smart backtracking (MRV)", color=COLORS["smart"])
-    # Markera staplar där vanlig backtracking gav upp
-    for bar, r in zip(b1, rows):
-        if r["vanlig_gav_upp"]:
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), "gav\nupp",
-                    ha="center", va="bottom", fontsize=8)
+    w = 0.38
+    means = [statistics.mean(counts[n]) for n in names]
+    worst = [max(counts[n]) for n in names]
+    b1 = ax.bar([i - w / 2 for i in x], means, w, label="Medelvärde", color="#9ecae1")
+    b2 = ax.bar([i + w / 2 for i in x], worst, w, label="Värsta fall",
+                color=[COLORS[n] for n in names])
+    for bars, values, fmt in ((b1, means, "{:.1f}"), (b2, worst, "{:d}")):
+        for bar, v in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, v * 1.15, fmt.format(v),
+                    ha="center", va="bottom", fontsize=10)
     ax.set_yscale("log")
-    top = max(max(r[key_basic], r[key_smart]) for r in rows)
-    ax.set_ylim(top=top * 6)     # plats för texten "gav upp" ovanför staplarna
+    ax.set_ylim(top=max(worst) * 4)
     ax.set_xticks(list(x))
-    ax.set_xticklabels(names)
-    ax.set_ylabel(ylabel + " (logaritmisk skala)")
-    ax.set_title(title)
+    ax.set_xticklabels([NAMES[n] for n in names])
+    ax.set_ylabel("Antal gissningar (logaritmisk skala)")
+    ax.set_title("Antal gissningar för att hitta ett tal mellan 0 och 100")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
-    fig.tight_layout()
-    path = os.path.join(OUT_DIR, filename)
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print("Sparade", path)
+    save_figure(fig, "medel_och_varsta.png")
+
+    # Graf 2: fördelning för binärsökning och slumpgissning
+    fig, ax = plt.subplots(figsize=(8, 5))
+    max_k = max(max(counts["binär"]), max(counts["slump"]))
+    ks = range(1, max_k + 1)
+    w = 0.4
+    for offset, name in ((-w / 2, "binär"), (w / 2, "slump")):
+        c = counts[name]
+        share = [100 * c.count(k) / len(c) for k in ks]
+        ax.bar([k + offset for k in ks], share, w, label=NAMES[name], color=COLORS[name])
+    ax.set_xticks(list(ks))
+    ax.set_xlabel("Antal gissningar")
+    ax.set_ylabel("Andel av spelen (%)")
+    ax.set_title("Hur många gissningar krävs? (tal 0-100)")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    save_figure(fig, "fordelning.png")
+
+    # Graf 3: binärsökning, antal gissningar för varje tal
+    fig, ax = plt.subplots(figsize=(11, 4))
+    secrets = list(range(LOW, HIGH + 1))
+    ax.bar(secrets, counts["binär"], color=COLORS["binär"], width=0.8)
+    ax.set_xlabel("Talet man tänker på")
+    ax.set_ylabel("Antal gissningar")
+    ax.set_title("Binärsökning: 50 hittas direkt, 24 och 75 efter 2 gissningar, ... "
+                 "inget tal kräver fler än 7")
+    ax.set_xlim(-1, 101)
+    ax.set_yticks(range(0, 8))
+    ax.grid(axis="y", alpha=0.3)
+    save_figure(fig, "binar_per_tal.png")
 
 
-def run_experiment_2(per_level):
-    clue_levels = [24, 27, 30, 33, 36, 40]
-    basic_means, smart_means, actual_clues = [], [], []
-    print(f"Experiment 2: {per_level} slumpade sudokun per nivå")
-    for clues in clue_levels:
-        b_steps, s_steps, real = [], [], []
-        for seed in range(per_level):
-            puzzle = generate_puzzle(clues, seed=1000 * clues + seed)
-            real.append(sum(v != 0 for row in puzzle for v in row))
-            b_steps.append(solve_basic(puzzle, max_steps=MAX_STEPS).steps)
-            s_steps.append(solve_smart(puzzle).steps)
-        basic_means.append(statistics.mean(b_steps))
-        smart_means.append(statistics.mean(s_steps))
-        actual_clues.append(statistics.mean(real))
-        print(f"  ~{clues} ledtrådar: vanlig {basic_means[-1]:>10.0f} steg, "
-              f"smart {smart_means[-1]:>8.0f} steg (medel)")
+# ----------------------------------------------------------------------
+# Experiment 2: hur stort är intervallet?
+# ----------------------------------------------------------------------
+def experiment_2():
+    rng = random.Random(2)
+    sizes = [10, 100, 1_000, 10_000, 100_000]
+    results = {name: [] for name in STRATEGIES}
+    rows = []
+    print(f"{'Antal tal':>10s} | {'Binär medel':>11s} {'värsta':>7s} | "
+          f"{'Slump medel':>11s} | {'Linjär medel':>12s}")
+    print("-" * 64)
+    for n in sizes:
+        low, high = 0, n - 1
+        # Binärsökning går snabbt, så vi testar ALLA tal i intervallet.
+        binary = [count_guesses(s, STRATEGIES["binär"], low, high) for s in range(n)]
+        # Linjär sökning och slumpgissning testas på ett urval av tal.
+        sample = list(range(n)) if n <= 1000 else rng.sample(range(n), 300)
+        runs = max(1, 2000 // len(sample))
+        rand = [count_guesses(s, STRATEGIES["slump"], low, high, rng)
+                for s in sample for _ in range(runs)]
+        linear = [count_guesses(s, STRATEGIES["linjär"], low, high) for s in sample]
+
+        b_mean, r_mean, l_mean = (statistics.mean(c) for c in (binary, rand, linear))
+        results["binär"].append(b_mean)
+        results["slump"].append(r_mean)
+        results["linjär"].append(l_mean)
+        print(f"{n:10,d} | {b_mean:11.2f} {max(binary):7d} | {r_mean:11.2f} | {l_mean:12.1f}")
+        rows.append({"antal_tal": n, "binar_medel": round(b_mean, 3),
+                     "binar_varsta": max(binary), "slump_medel": round(r_mean, 3),
+                     "linjar_medel": round(l_mean, 1)})
+    print()
+    save_csv(rows, "experiment2.csv")
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(actual_clues, basic_means, "o-", color=COLORS["basic"], label="Vanlig backtracking")
-    ax.plot(actual_clues, smart_means, "o-", color=COLORS["smart"], label="Smart backtracking (MRV)")
+    for name in STRATEGIES:
+        ax.plot(sizes, results[name], "o-", color=COLORS[name], label=NAMES[name] + " (medel)")
+    worst = [n.bit_length() for n in sizes]   # floor(log2 n) + 1
+    ax.plot(sizes, worst, "--", color=COLORS["binär"], alpha=0.6,
+            label="Binärsökning, värsta fall")
+    ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel("Antal givna siffror (ledtrådar)")
-    ax.set_ylabel("Medelantal steg (logaritmisk skala)")
-    ax.set_title(f"Färre ledtrådar = svårare sudoku ({per_level} sudokun per punkt)")
+    ax.set_xlabel("Antal möjliga tal (logaritmisk skala)")
+    ax.set_ylabel("Antal gissningar (logaritmisk skala)")
+    ax.set_title("Större intervall: linjär växer som n, binär och slump som log n")
     ax.legend()
-    ax.grid(alpha=0.3)
-    fig.tight_layout()
-    path = os.path.join(OUT_DIR, "steg_mot_ledtradar.png")
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    print("Sparade", path)
+    ax.grid(alpha=0.3, which="both")
+    save_figure(fig, "skalning.png")
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    quick = "--snabb" in sys.argv
-
-    print("=== Experiment 1: testsudokun ===\n")
-    rows = run_experiment_1()
-    save_csv(rows)
-    bar_chart(rows, "vanlig_steg", "smart_steg", "Antal steg",
-              "Antal steg: vanlig vs smart backtracking", "jamforelse_steg.png")
-    bar_chart(rows, "vanlig_tid_s", "smart_tid_s", "Tid (sekunder)",
-              "Tid: vanlig vs smart backtracking", "jamforelse_tid.png")
-
-    print("\n=== Experiment 2: antal ledtrådar ===\n")
-    run_experiment_2(per_level=3 if quick else 10)
+    print("=== Experiment 1: alla tal 0-100 ===\n")
+    experiment_1()
+    print("\n=== Experiment 2: olika stora intervall ===\n")
+    experiment_2()
 
 
 if __name__ == "__main__":
